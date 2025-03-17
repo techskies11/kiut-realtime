@@ -1,116 +1,84 @@
 package main
 
 import (
-	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"strings"
-
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/apigatewaymanagementapi"
-	"github.com/gorilla/mux"
-	"github.com/gorilla/websocket"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
-
-var apiGatewayClient *apigatewaymanagementapi.Client
-var apiEndpoint string
-
-func init() {
-	// Set API Gateway URL from environment variable
-	apiEndpoint = os.Getenv("API_GATEWAY_ENDPOINT")
-	if apiEndpoint == "" {
-		log.Fatal("API_GATEWAY_ENDPOINT environment variable is not set")
-	}
-
-	// Load AWS SDK v2 configuration
-	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion("us-east-1"))
-	if err != nil {
-		log.Fatalf("Unable to load AWS SDK config: %v", err)
-	}
-
-	// Initialize API Gateway Management API client
-	apiGatewayClient = apigatewaymanagementapi.NewFromConfig(cfg, func(o *apigatewaymanagementapi.Options) {
-		o.BaseEndpoint = aws.String(apiEndpoint)
-	})
-}
-
-func handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Println("Failed to upgrade connection:", err)
-		return
-	}
-	defer conn.Close()
-
-	// Extract connection ID from request
-	connectionID := extractConnectionID(r)
-	if connectionID == "" {
-		log.Println("No connection ID found")
+func connectHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST requests are allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	log.Println("New WebSocket connection:", connectionID)
-
-	for {
-		_, message, err := conn.ReadMessage()
-		if err != nil {
-			log.Println("Read error:", err)
-			break
-		}
-
-		log.Printf("Received message from %s: %s\n", connectionID, string(message))
-
-		// Echo message back
-		err = sendMessageToClient(connectionID, message)
-		if err != nil {
-			log.Println("Error sending message:", err)
-		}
+	var data any
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
 	}
+	defer r.Body.Close()
+
+	response := fmt.Sprintf("Received: %s", data)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"response": response})
 }
 
-func extractConnectionID(r *http.Request) string {
-	// Extract connection ID from URL path
-	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) < 3 {
-		return ""
+func disconnectHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Only DELETE requests are allowed", http.StatusMethodNotAllowed)
+		return
 	}
-	return parts[len(parts)-1]
+
+	var data any
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	response := fmt.Sprintf("Received: %s", data)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"response": response})
 }
 
-func sendMessageToClient(connectionID string, message []byte) error {
-	ctx := context.TODO()
-
-	input := &apigatewaymanagementapi.PostToConnectionInput{
-		ConnectionId: aws.String(connectionID),
-		Data:         message,
+func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST requests are allowed", http.StatusMethodNotAllowed)
+		return
 	}
 
-	_, err := apiGatewayClient.PostToConnection(ctx, input)
-	if err != nil {
-		return fmt.Errorf("failed to send message: %w", err)
+	var data any
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
 	}
-	return nil
+	defer r.Body.Close()
+
+	response := fmt.Sprintf("Received: %s", data)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"response": response})
 }
 
 func main() {
-	r := mux.NewRouter()
-	r.HandleFunc("/ws/{connectionID}", handleWebSocket)
+	http.HandleFunc("/connect", connectHandler)
+	http.HandleFunc("/disconnect", disconnectHandler)
+	http.HandleFunc("/sendMessage", sendMessageHandler)
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	log.Println("Server listening on port", port)
-	err := http.ListenAndServe(":"+port, r)
-	if err != nil {
-		log.Fatal("ListenAndServe:", err)
+	server := &http.Server{
+		Addr: fmt.Sprintf(":%s", port),
 	}
+
+	log.Println("Server is running on port 8080...")
+	log.Fatal(server.ListenAndServe())
 }
