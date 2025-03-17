@@ -66,9 +66,10 @@ func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	http.HandleFunc("/connect", connectHandler)
-	http.HandleFunc("/disconnect", disconnectHandler)
-	http.HandleFunc("/sendMessage", sendMessageHandler)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/connect", connectHandler)
+	mux.HandleFunc("/disconnect", disconnectHandler)
+	mux.HandleFunc("/sendMessage", sendMessageHandler)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -76,7 +77,8 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr: fmt.Sprintf(":%s", port),
+		Addr:    fmt.Sprintf("127.0.0.1:%s", port),
+		Handler: mux,
 	}
 
 	log.Println("Server is running on port 8080...")
