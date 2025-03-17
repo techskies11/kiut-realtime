@@ -65,11 +65,23 @@ func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"response": response})
 }
 
+func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Only GET requests are allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
 func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/connect", connectHandler)
 	mux.HandleFunc("/disconnect", disconnectHandler)
 	mux.HandleFunc("/sendMessage", sendMessageHandler)
+	mux.HandleFunc("/health", healthCheckHandler)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -77,7 +89,7 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr:    fmt.Sprintf("127.0.0.1:%s", port),
+		Addr:    fmt.Sprintf("0.0.0.0:%s", port),
 		Handler: mux,
 	}
 
