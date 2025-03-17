@@ -5,13 +5,13 @@ WORKDIR /app
 
 # Copy go modules files first to leverage Docker caching
 COPY go.mod go.sum ./
-RUN go mod tidy
+RUN go mod download
 
 # Copy the entire project
 COPY . .
 
 # Build the application, setting the output binary name
-RUN go build -o realtime-server ./cmd/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o realtime-server ./cmd/main.go
 
 # Use a minimal image for production
 FROM alpine:latest
@@ -29,4 +29,4 @@ ENV PORT=8080
 EXPOSE 8080
 
 # Run the application
-CMD ["./realtime-server"]
+ENTRYPOINT ["/root/realtime-server"]
