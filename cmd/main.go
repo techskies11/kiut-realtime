@@ -69,7 +69,6 @@ func connectHandler(w http.ResponseWriter, r *http.Request) {
 	println(response)
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"response": response})
 }
 
 func disconnectHandler(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +91,6 @@ func disconnectHandler(w http.ResponseWriter, r *http.Request) {
 	println(response)
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"response": response})
 }
 
 func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
