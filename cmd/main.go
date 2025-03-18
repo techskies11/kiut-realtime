@@ -125,7 +125,7 @@ func sendMessageToClient(connectionID string, message []byte) error {
 
 	_, err := apiGatewayClient.PostToConnection(ctx, input)
 	if err != nil {
-		return fmt.Errorf("Failed to send message: %v", err)
+		return fmt.Errorf("failed to send message: %v", err)
 	}
 	return nil
 }
