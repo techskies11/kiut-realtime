@@ -49,16 +49,25 @@ func init() {
 	})
 }
 
+func printHeaders(r *http.Request) {
+	for name, headers := range r.Header {
+		for _, h := range headers {
+			fmt.Printf("%v: %v\n", name, h)
+		}
+	}
+}
+
 func connectHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST requests are allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	printHeaders(r)
 
 	var data SimpleContext
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid JSON"})
 		return
@@ -77,10 +86,11 @@ func disconnectHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	printHeaders(r)
 
 	var data SimpleContext
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid JSON"})
 		return
@@ -99,10 +109,11 @@ func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	printHeaders(r)
 
 	var data MessageContext
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid JSON"})
 		return
@@ -116,8 +127,9 @@ func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
 	connectionID := data.ConnectionId
 	message := []byte(data.Body.Message)
 	if (sendMessageToClient(connectionID, message)) != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to send message"})
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusGone)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to send message. Connection is gone."})
 		return
 	}
 
