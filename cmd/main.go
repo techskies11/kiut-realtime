@@ -49,21 +49,11 @@ func init() {
 	})
 }
 
-func printHeaders(r *http.Request) {
-	for name, headers := range r.Header {
-		for _, h := range headers {
-			fmt.Printf("%v: %v\n", name, h)
-		}
-	}
-}
-
 func connectHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST requests are allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
-	printHeaders(r)
 
 	var data SimpleContext
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
@@ -86,8 +76,6 @@ func disconnectHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	printHeaders(r)
-
 	var data SimpleContext
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -109,8 +97,6 @@ func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	printHeaders(r)
-
 	var data MessageContext
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -126,10 +112,14 @@ func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
 	// Extract connectionId from data
 	connectionID := data.ConnectionId
 	message := []byte(data.Body.Message)
-	if (sendMessageToClient(connectionID, message)) != nil {
+
+	err := sendMessageToClient(connectionID, message)
+	if err != nil {
+		println(fmt.Sprintf("Failed to send message: %v", err))
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusGone)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to send message. Connection is gone."})
+		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Failed to send message: %v", err)})
 		return
 	}
 
@@ -137,6 +127,7 @@ func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func sendMessageToClient(connectionID string, message []byte) error {
+	println("Sending message to client...")
 	ctx := context.TODO()
 
 	input := &apigatewaymanagementapi.PostToConnectionInput{
@@ -147,7 +138,7 @@ func sendMessageToClient(connectionID string, message []byte) error {
 	_, err := apiGatewayClient.PostToConnection(ctx, input)
 	if err != nil {
 		println(err)
-		return fmt.Errorf("failed to send message: %w", err)
+		return fmt.Errorf("Failed to send message: %v", err)
 	}
 	return nil
 }
