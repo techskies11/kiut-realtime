@@ -64,9 +64,6 @@ func connectHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	response := fmt.Sprintf("Connecting: %s", data)
-	println(response)
-
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -84,9 +81,6 @@ func disconnectHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer r.Body.Close()
-
-	response := fmt.Sprintf("Disconnecting: %s", data)
-	println(response)
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -106,17 +100,12 @@ func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	response := fmt.Sprintf("I got your message!: %s", data)
-	println(response)
-
 	// Extract connectionId from data
 	connectionID := data.ConnectionId
-	message := []byte(data.Body.Message)
+	message := fmt.Appendf(nil, "msg recieved: %s", data.Body.Message)
 
 	err := sendMessageToClient(connectionID, message)
 	if err != nil {
-		println(fmt.Sprintf("Failed to send message: %v", err))
-
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusGone)
 		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Failed to send message: %v", err)})
@@ -127,7 +116,6 @@ func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func sendMessageToClient(connectionID string, message []byte) error {
-	println("Sending message to client...")
 	ctx := context.TODO()
 
 	input := &apigatewaymanagementapi.PostToConnectionInput{
@@ -137,7 +125,6 @@ func sendMessageToClient(connectionID string, message []byte) error {
 
 	_, err := apiGatewayClient.PostToConnection(ctx, input)
 	if err != nil {
-		println(err)
 		return fmt.Errorf("Failed to send message: %v", err)
 	}
 	return nil
