@@ -88,13 +88,6 @@ func setupServerConfigs(client *websocket.Conn) error {
 }
 
 func eventListener(connectionID string, client *websocket.Conn) {
-	// Setup server configs
-	err := setupServerConfigs(client)
-	if err != nil {
-		log.Printf("error: %v", err)
-		return
-	}
-
 	for {
 		_, message, err := client.ReadMessage()
 		if err != nil {
@@ -136,6 +129,12 @@ func connectToOpenAI(connectionID string) error {
 		ID:   connectionID,
 	}
 
+	// Setup server configs
+	// err = setupServerConfigs(client)
+	// if err != nil {
+	// 	log.Printf("error: %v", err)
+	// 	return fmt.Errorf("error: %v", err)
+	// }
 	// Start a goroutine to read messages from the WebSocket server and just print them for now
 	go eventListener(connectionID, client)
 
