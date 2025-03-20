@@ -22,6 +22,7 @@ WORKDIR /root/
 COPY --from=builder /app/realtime-server .
 
 # Set environment variables
+ENV OPENAI_WSS_URL="wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17"
 ENV API_GATEWAY_ENDPOINT="https://qbo0hzke23.execute-api.us-east-1.amazonaws.com/dev"
 ENV PORT=8080
 

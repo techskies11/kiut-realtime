@@ -6,6 +6,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.36.3
 	github.com/aws/aws-sdk-go-v2/config v1.29.9
 	github.com/aws/aws-sdk-go-v2/service/apigatewaymanagementapi v1.24.1
+	github.com/gorilla/websocket v1.5.3
 )
 
 require (

@@ -7,10 +7,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/apigatewaymanagementapi"
+	"github.com/gorilla/websocket"
 )
 
 type SimpleContext struct {
@@ -26,6 +28,16 @@ type MessageContext struct {
 	Body         BodyContext `json:"body"`
 	ConnectionId string      `json:"connectionId"`
 }
+
+type WebSocketClient struct {
+	Conn *websocket.Conn
+	ID   string
+}
+
+var (
+	clients   = make(map[string]*WebSocketClient)
+	clientsMu sync.Mutex
+)
 
 var apiGatewayClient *apigatewaymanagementapi.Client
 var apiEndpoint string
@@ -49,6 +61,43 @@ func init() {
 	})
 }
 
+func eventListener(connectionID string, client *websocket.Conn) {
+	for {
+		_, message, err := client.ReadMessage()
+		if err != nil {
+			log.Printf("error: %v", err)
+			break
+		}
+		sendMessageToClient(connectionID, message)
+
+		log.Printf("message received: %s", message)
+	}
+}
+
+func connectToOpenAI(connectionID string) error {
+	clientsMu.Lock()
+	defer clientsMu.Unlock()
+
+	wssEndpoint := os.Getenv("OPENAI_WSS_URL")
+	client, code, err := websocket.DefaultDialer.Dial(wssEndpoint, nil)
+	if err != nil {
+		// Error with the code and error
+		msg := fmt.Sprintf("failed to connect to the WebSocket server: %d %v", code.StatusCode, err)
+		log.Println(msg)
+		return fmt.Errorf("error: %s", msg)
+	}
+
+	clients[connectionID] = &WebSocketClient{
+		Conn: client,
+		ID:   connectionID,
+	}
+
+	// Start a goroutine to read messages from the WebSocket server and just print them for now
+	go eventListener(connectionID, client)
+
+	return nil
+}
+
 func connectHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST requests are allowed", http.StatusMethodNotAllowed)
@@ -63,6 +112,15 @@ func connectHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer r.Body.Close()
+
+	// Create a new WebSocket client and add it to the clients map using the connection ID as the key
+	err := connectToOpenAI(data.ConnectionID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusGone)
+		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Failed to connect: %v", err)})
+		return
+	}
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -82,10 +140,34 @@ func disconnectHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
+	// Close the WebSocket connection and remove the client from the clients map
+	clientsMu.Lock()
+	defer clientsMu.Unlock()
+	client, ok := clients[data.ConnectionID]
+	if ok {
+		client.Conn.Close()
+		delete(clients, data.ConnectionID)
+	}
+
 	w.WriteHeader(http.StatusOK)
 }
 
-func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
+func forwardMessageToOpenAI(connectionID string, message []byte) error {
+	// read only operation, no need to lock
+	client, ok := clients[connectionID]
+	if !ok {
+		return fmt.Errorf("client with connection ID %s not found", connectionID)
+	}
+
+	err := client.Conn.WriteMessage(websocket.TextMessage, message)
+	if err != nil {
+		return fmt.Errorf("failed to send message to OpenAI: %v", err)
+	}
+
+	return nil
+}
+
+func defaultHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Only POST requests are allowed", http.StatusMethodNotAllowed)
 		return
@@ -104,7 +186,8 @@ func sendMessageHandler(w http.ResponseWriter, r *http.Request) {
 	connectionID := data.ConnectionId
 	message := fmt.Appendf(nil, "msg recieved: %s", data.Body.Message)
 
-	err := sendMessageToClient(connectionID, message)
+	// Forward the message to the OpenAI WebSocket server
+	err := forwardMessageToOpenAI(connectionID, message)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusGone)
@@ -145,7 +228,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/connect", connectHandler)
 	mux.HandleFunc("/disconnect", disconnectHandler)
-	mux.HandleFunc("/sendMessage", sendMessageHandler)
+	mux.HandleFunc("/msg", defaultHandler)
 	mux.HandleFunc("/health", healthCheckHandler)
 
 	port := os.Getenv("PORT")
