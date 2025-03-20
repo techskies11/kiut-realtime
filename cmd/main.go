@@ -84,7 +84,7 @@ func connectToOpenAI(connectionID string) error {
 	headers.Set("Authorization", "Bearer "+OPENAI_API_KEY)
 	headers.Set("OpenAI-Beta", "realtime=v1")
 
-	client, code, err := websocket.DefaultDialer.Dial(wssEndpoint, nil)
+	client, code, err := websocket.DefaultDialer.Dial(wssEndpoint, headers)
 	if err != nil {
 		// Error with the code and error
 		msg := fmt.Sprintf("failed to connect to the WebSocket server: %d %v", code.StatusCode, err)
