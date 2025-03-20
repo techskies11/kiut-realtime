@@ -149,10 +149,8 @@ func handleEvent(connectionID string, message []byte) {
 	if err != nil {
 		log.Printf("[Listener] Error unmarshalling message for connection %s: %v", connectionID, err)
 		return
-	} else {
-		log.Printf("[Listener] Event listened: %s", event.Type)
 	}
-	log.Printf("[Listener] Handling event of type: %s for connection %s", event.Type, connectionID)
+	log.Printf("[Listener] Event listened: %s", event.Type)
 
 	if event.Type != "response.audio.delta" {
 		return
@@ -299,7 +297,7 @@ func disconnectHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func forwardMessageToOpenAI(connectionID string, event AudioEvent) error {
-	log.Printf("[OpenAI] forwarding message to OpenAI: %s", event.Type)
+	// log.Printf("[OpenAI] forwarding message to OpenAI: %s", event.Type)
 	// read only lock
 	clientsMu.Lock()
 	client, ok := clients[connectionID]
@@ -309,14 +307,14 @@ func forwardMessageToOpenAI(connectionID string, event AudioEvent) error {
 	}
 
 	// forward the message to the OpenAI WebSocket server. sends both type and audio from AudioEvent
-	log.Print("[OpenAI] sending message to OpenAI")
+	// log.Print("[OpenAI] sending message to OpenAI")
 	err := client.WriteJSON(event)
 	if err != nil {
 		log.Printf("[OpenAI] failed to send message to OpenAI: %v", err)
 		return fmt.Errorf("[OpenAI] failed to send message to OpenAI: %v", err)
 	}
 
-	log.Printf("[OpenAI] Successfully forwarded message to OpenAI")
+	// log.Printf("[OpenAI] Successfully forwarded message to OpenAI")
 	return nil
 }
 
@@ -368,7 +366,7 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 
 	connectionID := data.ConnectionID
 	mediaEventBody := data.Body
-	log.Printf("[TWILIO] Received media event: %s", mediaEventBody.Event)
+	// log.Printf("[TWILIO] Received media event: %s", mediaEventBody.Event)
 
 	if mediaEventBody.Event == "start" {
 		streamSIDMu.Lock()
