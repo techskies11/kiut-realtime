@@ -212,6 +212,7 @@ func forwardMessageToOpenAI(connectionID string, message AudioEvent) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal message: %v", err)
 	}
+	log.Printf("sending message to OpenAI: %s", string(messageBytes))
 	err = client.Conn.WriteMessage(websocket.TextMessage, messageBytes)
 	if err != nil {
 		return fmt.Errorf("failed to send message to OpenAI: %v", err)
@@ -237,9 +238,6 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Extract connectionId from data
 	connectionID := data.ConnectionId
-
-	// log body type
-	log.Printf("Received message from connection ID %s: %v", connectionID, data.Body)
 
 	// Forward the message to the OpenAI WebSocket server
 	err := forwardMessageToOpenAI(connectionID, data.Body)
