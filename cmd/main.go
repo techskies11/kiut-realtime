@@ -217,13 +217,6 @@ func disconnectHandler(w http.ResponseWriter, r *http.Request) {
 func forwardMessageToOpenAI(event AudioMessage) error {
 	log.Printf("[OpenAI] forwarding message to OpenAI: %s", event.Body.Type)
 	// read only lock
-	_event := SessionUpdate{
-		Type: "session.update",
-		Session: OpenAISession{
-			Instructions: "eres una novia celosa",
-		},
-	}
-
 	clientsMu.Lock()
 	defer clientsMu.Unlock()
 	client, ok := clients[event.ConnectionId]
@@ -232,7 +225,7 @@ func forwardMessageToOpenAI(event AudioMessage) error {
 	}
 
 	// forward the message to the OpenAI WebSocket server. sends both type and audio from AudioEvent
-	messageBytes, err := json.Marshal(_event)
+	messageBytes, err := json.Marshal(event)
 	if err != nil {
 		log.Printf("[OpenAI] failed to marshal message: %v", err)
 		return fmt.Errorf("[OpenAI] failed to marshal message: %v", err)
