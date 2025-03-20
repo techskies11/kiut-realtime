@@ -43,6 +43,10 @@ type WebSocketClient struct {
 	ID   string
 }
 
+type GenericEvent struct {
+	Type string `json:"type"`
+}
+
 var (
 	clients   = make(map[string]*WebSocketClient)
 	clientsMu sync.Mutex
@@ -103,8 +107,9 @@ func eventListener(connectionID string, client *websocket.Conn) {
 			break
 		}
 		sendMessageToClient(connectionID, message)
-
-		log.Printf("message received: %s", message)
+		var event GenericEvent
+		err = json.Unmarshal(message, &event)
+		log.Printf("event received: %s", event.Type)
 	}
 }
 
