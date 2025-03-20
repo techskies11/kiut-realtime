@@ -220,8 +220,8 @@ func connectToOpenAI(connectionID string) error {
 	}
 
 	clientsMu.Lock()
-	defer clientsMu.Unlock()
 	clients[connectionID] = client
+	clientsMu.Unlock()
 
 	// Setup server configs
 	err = setupServerConfigs(client)
@@ -305,8 +305,8 @@ func forwardMessageToOpenAI(connectionID string, event AudioEvent) error {
 	log.Printf("[OpenAI] forwarding message to OpenAI: %s", event.Type)
 	// read only lock
 	clientsMu.Lock()
-	defer clientsMu.Unlock()
 	client, ok := clients[connectionID]
+	clientsMu.Unlock()
 	if !ok {
 		return fmt.Errorf("[OpenAI] client with connection ID %s not found", connectionID)
 	}
