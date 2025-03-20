@@ -369,6 +369,7 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 	// log.Printf("[TWILIO] Received media event: %s", mediaEventBody.Event)
 
 	if mediaEventBody.Event == "start" {
+		log.Printf("[TWILIO] Start event: %s", string(bodyBytes))
 		streamSIDMu.Lock()
 		connectionToStreamSID[connectionID] = mediaEventBody.StreamSID
 		streamSIDMu.Unlock()
