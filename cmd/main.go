@@ -101,6 +101,7 @@ func eventListener(connectionID string, client *websocket.Conn) {
 			log.Printf("error: %v", err)
 			break
 		}
+		log.Printf("received: %s", message)
 		sendMessageToClient(connectionID, message)
 		var event GenericEvent
 		err = json.Unmarshal(message, &event)
@@ -261,6 +262,7 @@ func sendMessageToClient(connectionID string, message []byte) error {
 
 	_, err := apiGatewayClient.PostToConnection(ctx, input)
 	if err != nil {
+		log.Printf("Failed to send message: %v", err)
 		return fmt.Errorf("failed to send message: %v", err)
 	}
 	return nil
