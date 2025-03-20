@@ -225,7 +225,7 @@ func forwardMessageToOpenAI(event AudioMessage) error {
 	}
 
 	// forward the message to the OpenAI WebSocket server. sends both type and audio from AudioEvent
-	messageBytes, err := json.Marshal(event)
+	messageBytes, err := json.Marshal(event.Body)
 	if err != nil {
 		log.Printf("[OpenAI] failed to marshal message: %v", err)
 		return fmt.Errorf("[OpenAI] failed to marshal message: %v", err)
