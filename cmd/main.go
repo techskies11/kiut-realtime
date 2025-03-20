@@ -79,6 +79,11 @@ func connectToOpenAI(connectionID string) error {
 	defer clientsMu.Unlock()
 
 	wssEndpoint := os.Getenv("OPENAI_WSS_URL")
+	OPENAI_API_KEY := os.Getenv("OPENAI_API_KEY")
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer "+OPENAI_API_KEY)
+	headers.Set("OpenAI-Beta", "realtime=v1")
+
 	client, code, err := websocket.DefaultDialer.Dial(wssEndpoint, nil)
 	if err != nil {
 		// Error with the code and error
