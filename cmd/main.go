@@ -29,6 +29,15 @@ type MessageContext struct {
 	ConnectionId string      `json:"connectionId"`
 }
 
+type OpenAISession struct {
+	Instructions string `json:"instructions"`
+}
+
+type SessionUpdate struct {
+	Type    string        `json:"type"`
+	Session OpenAISession `json:"session"`
+}
+
 type WebSocketClient struct {
 	Conn *websocket.Conn
 	ID   string
@@ -61,7 +70,32 @@ func init() {
 	})
 }
 
+func setupServerConfigs(client *websocket.Conn) error {
+	// initialize server configs. send a session.update event type to the client
+	// to update the session state of the form {"type": "session.update", "data": {"state": "init"}}
+	sessionUpdate := SessionUpdate{
+		Type: "session.update",
+		Session: OpenAISession{
+			Instructions: "Eres un asistente de ventas para una aerolínea. Eres tajante y conciso. Te restringes únicamente a responder sus preguntas asociadas a sus viajes, o lo guías a ese tipo de conversación.",
+		},
+	}
+	sessionUpdateBytes, err := json.Marshal(sessionUpdate)
+	if err != nil {
+		return fmt.Errorf("error: %v", err)
+	}
+	client.WriteMessage(websocket.TextMessage, sessionUpdateBytes)
+
+	return nil
+}
+
 func eventListener(connectionID string, client *websocket.Conn) {
+	// Setup server configs
+	err := setupServerConfigs(client)
+	if err != nil {
+		log.Printf("error: %v", err)
+		return
+	}
+
 	for {
 		_, message, err := client.ReadMessage()
 		if err != nil {
