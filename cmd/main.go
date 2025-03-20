@@ -89,6 +89,22 @@ func setupServerConfigs(client *websocket.Conn) error {
 	return nil
 }
 
+func handleEvent(connectionID string, message []byte) {
+	// log.Printf("received: %s", message)
+	err := sendMessageToClient(connectionID, message)
+	if err != nil {
+		log.Printf("[Listener] Error sending message to client %s: %v", connectionID, err)
+		return
+	}
+	var event GenericEvent
+	err = json.Unmarshal(message, &event)
+	if err != nil {
+		log.Printf("[Listener] Error unmarshalling message for connection %s: %v", connectionID, err)
+	} else {
+		log.Printf("[Listener] Event listened: %s", event.Type)
+	}
+}
+
 func eventListener(connectionID string, client *websocket.Conn) {
 	// Listen for messages from the WebSocket server and send them to the client
 	log.Printf("[Listener] Started listening for connection: %s", connectionID)
@@ -99,15 +115,7 @@ func eventListener(connectionID string, client *websocket.Conn) {
 			log.Printf("[Listener] Error reading message for connection %s: %v", connectionID, err)
 			break
 		}
-		// log.Printf("received: %s", message)
-		sendMessageToClient(connectionID, message)
-		var event GenericEvent
-		err = json.Unmarshal(message, &event)
-		if err != nil {
-			log.Printf("[Listener] Error unmarshalling message for connection %s: %v", connectionID, err)
-		} else {
-			log.Printf("[Listener] Event listened: %s", event.Type)
-		}
+		go handleEvent(connectionID, message)
 	}
 }
 
