@@ -300,8 +300,8 @@ func forwardMessageToOpenAI(connectionID string, event AudioEvent) error {
 	// log.Printf("[OpenAI] forwarding message to OpenAI: %s", event.Type)
 	// read only lock
 	clientsMu.Lock()
+	defer clientsMu.Unlock()
 	client, ok := clients[connectionID]
-	clientsMu.Unlock()
 	if !ok {
 		return fmt.Errorf("[OpenAI] client with connection ID %s not found", connectionID)
 	}
@@ -369,7 +369,6 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 	// log.Printf("[TWILIO] Received media event: %s", mediaEventBody.Event)
 
 	if mediaEventBody.Event == "start" {
-		log.Printf("[TWILIO] Start event: %s", string(bodyBytes))
 		streamSIDMu.Lock()
 		connectionToStreamSID[connectionID] = mediaEventBody.StreamSID
 		streamSIDMu.Unlock()
