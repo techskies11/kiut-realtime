@@ -56,8 +56,8 @@ type AudioDeltaEvent struct {
 
 type TwilioMediaInfo struct {
 	Track     string `json:"track"`
-	Chunk     string `json:"chunk"`
-	Timestamp string `json:"timestamp"`
+	Chunk     string `json:"chunk,omitempty"`
+	Timestamp string `json:"timestamp,omitempty"`
 	Payload   string `json:"payload"`
 }
 
@@ -138,6 +138,7 @@ func createTwilioMediaEvent(streamSID string, audioDelta AudioDeltaEvent) Twilio
 		Event:     "media",
 		StreamSID: streamSID,
 		Media: TwilioMediaInfo{
+			Track:   "outbound",
 			Payload: audioDelta.Delta,
 		},
 	}
