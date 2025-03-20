@@ -99,7 +99,7 @@ func eventListener(connectionID string, client *websocket.Conn) {
 			log.Printf("[Listener] Error reading message for connection %s: %v", connectionID, err)
 			break
 		}
-		log.Printf("received: %s", message)
+		// log.Printf("received: %s", message)
 		sendMessageToClient(connectionID, message)
 		var event GenericEvent
 		err = json.Unmarshal(message, &event)
@@ -206,27 +206,27 @@ func disconnectHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func forwardMessageToOpenAI(event AudioMessage) error {
-	log.Printf("[AWS] forwarding message to OpenAI: %s", event.Body.Audio)
+	log.Printf("[OpenAI] forwarding message to OpenAI: %s", event.Body.Type)
 	// read only operation, no need to lock
 	client, ok := clients[event.ConnectionId]
 	if !ok {
-		return fmt.Errorf("client with connection ID %s not found", event.ConnectionId)
+		return fmt.Errorf("[OpenAI] client with connection ID %s not found", event.ConnectionId)
 	}
 
 	// forward the message to the OpenAI WebSocket server. sends both type and audio from AudioEvent
 	messageBytes, err := json.Marshal(event.Body)
 	if err != nil {
-		log.Printf("failed to marshal message: %v", err)
-		return fmt.Errorf("failed to marshal message: %v", err)
+		log.Printf("[OpenAI] failed to marshal message: %v", err)
+		return fmt.Errorf("[OpenAI] failed to marshal message: %v", err)
 	}
-	log.Printf("sending message to OpenAI: %s", string(messageBytes))
+	log.Print("[OpenAI] sending message to OpenAI")
 	err = client.WriteMessage(websocket.TextMessage, messageBytes)
 	if err != nil {
-		log.Printf("failed to send message to OpenAI: %v", err)
-		return fmt.Errorf("failed to send message to OpenAI: %v", err)
+		log.Printf("[OpenAI] failed to send message to OpenAI: %v", err)
+		return fmt.Errorf("[OpenAI] failed to send message to OpenAI: %v", err)
 	}
 
-	log.Printf("[AWS] Successfully forwarded message to OpenAI")
+	log.Printf("[OpenAI] Successfully forwarded message to OpenAI")
 	return nil
 }
 
@@ -248,7 +248,7 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 	// Forward the message to the OpenAI WebSocket server
 	err := forwardMessageToOpenAI(data)
 	if err != nil {
-		log.Printf("Failed to send message: %v", err)
+		log.Printf("[OpenAI] Failed to send message: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusGone)
 		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Failed to send message: %v", err)})
