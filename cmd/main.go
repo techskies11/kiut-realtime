@@ -28,11 +28,6 @@ type SessionUpdate struct {
 	Session OpenAISession `json:"session"`
 }
 
-type WebSocketClient struct {
-	Conn *websocket.Conn
-	ID   string
-}
-
 type GenericEvent struct {
 	Type string `json:"type"`
 }
@@ -48,7 +43,7 @@ type AudioMessage struct {
 }
 
 var (
-	clients   = make(map[string]*WebSocketClient)
+	clients   = make(map[string]*websocket.Conn)
 	clientsMu sync.Mutex
 )
 
@@ -77,6 +72,8 @@ func init() {
 func setupServerConfigs(client *websocket.Conn) error {
 	// initialize server configs. send a session.update event type to the client
 	// to update the session state of the form {"type": "session.update", "data": {"state": "init"}}
+	log.Println("Setting up openai server configs...")
+
 	sessionUpdate := SessionUpdate{
 		Type: "session.update",
 		Session: OpenAISession{
@@ -93,10 +90,13 @@ func setupServerConfigs(client *websocket.Conn) error {
 }
 
 func eventListener(connectionID string, client *websocket.Conn) {
+	// Listen for messages from the WebSocket server and send them to the client
+	log.Printf("[Listener] Started listening for connection: %s", connectionID)
+
 	for {
 		_, message, err := client.ReadMessage()
 		if err != nil {
-			log.Printf("error: %v", err)
+			log.Printf("[Listener] Error reading message for connection %s: %v", connectionID, err)
 			break
 		}
 		log.Printf("received: %s", message)
@@ -104,16 +104,16 @@ func eventListener(connectionID string, client *websocket.Conn) {
 		var event GenericEvent
 		err = json.Unmarshal(message, &event)
 		if err != nil {
-			log.Printf("error: %v", err)
+			log.Printf("[Listener] Error unmarshalling message for connection %s: %v", connectionID, err)
 		} else {
-			log.Printf("event received: %s", event.Type)
+			log.Printf("[Listener] Event listened: %s", event.Type)
 		}
 	}
 }
 
 func connectToOpenAI(connectionID string) error {
-	clientsMu.Lock()
-	defer clientsMu.Unlock()
+	// Connect to the OpenAI WebSocket server
+	log.Println("Connecting to OpenAI WebSocket server...")
 
 	wssEndpoint := os.Getenv("OPENAI_WSS_URL")
 	OPENAI_API_KEY := os.Getenv("OPENAI_API_KEY")
@@ -129,10 +129,9 @@ func connectToOpenAI(connectionID string) error {
 		return fmt.Errorf("error: %s", msg)
 	}
 
-	clients[connectionID] = &WebSocketClient{
-		Conn: client,
-		ID:   connectionID,
-	}
+	clientsMu.Lock()
+	clients[connectionID] = client
+	clientsMu.Unlock()
 
 	// Setup server configs
 	err = setupServerConfigs(client)
@@ -142,6 +141,8 @@ func connectToOpenAI(connectionID string) error {
 	}
 	// Start a goroutine to read messages from the WebSocket server and just print them for now
 	go eventListener(connectionID, client)
+
+	log.Println("Successfully connected to OpenAI WebSocket server")
 
 	return nil
 }
@@ -170,6 +171,8 @@ func connectHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("[AWS] Successfully connected client... %s", data.ConnectionID)
+
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -188,36 +191,42 @@ func disconnectHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
+	log.Printf("[AWS] Disconnecting client... %s", data.ConnectionID)
+
 	// Close the WebSocket connection and remove the client from the clients map
 	clientsMu.Lock()
 	defer clientsMu.Unlock()
 	client, ok := clients[data.ConnectionID]
 	if ok {
-		client.Conn.Close()
+		client.Close()
 		delete(clients, data.ConnectionID)
 	}
 
 	w.WriteHeader(http.StatusOK)
 }
 
-func forwardMessageToOpenAI(connectionID string, message AudioEvent) error {
+func forwardMessageToOpenAI(event AudioMessage) error {
+	log.Printf("[AWS] forwarding message to OpenAI: %s", event.Body.Audio)
 	// read only operation, no need to lock
-	client, ok := clients[connectionID]
+	client, ok := clients[event.ConnectionId]
 	if !ok {
-		return fmt.Errorf("client with connection ID %s not found", connectionID)
+		return fmt.Errorf("client with connection ID %s not found", event.ConnectionId)
 	}
 
 	// forward the message to the OpenAI WebSocket server. sends both type and audio from AudioEvent
-	messageBytes, err := json.Marshal(message)
+	messageBytes, err := json.Marshal(event.Body)
 	if err != nil {
+		log.Printf("failed to marshal message: %v", err)
 		return fmt.Errorf("failed to marshal message: %v", err)
 	}
 	log.Printf("sending message to OpenAI: %s", string(messageBytes))
-	err = client.Conn.WriteMessage(websocket.TextMessage, messageBytes)
+	err = client.WriteMessage(websocket.TextMessage, messageBytes)
 	if err != nil {
+		log.Printf("failed to send message to OpenAI: %v", err)
 		return fmt.Errorf("failed to send message to OpenAI: %v", err)
 	}
 
+	log.Printf("[AWS] Successfully forwarded message to OpenAI")
 	return nil
 }
 
@@ -236,11 +245,8 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	// Extract connectionId from data
-	connectionID := data.ConnectionId
-
 	// Forward the message to the OpenAI WebSocket server
-	err := forwardMessageToOpenAI(connectionID, data.Body)
+	err := forwardMessageToOpenAI(data)
 	if err != nil {
 		log.Printf("Failed to send message: %v", err)
 		w.Header().Set("Content-Type", "application/json")
@@ -253,6 +259,7 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func sendMessageToClient(connectionID string, message []byte) error {
+	log.Printf("[AWS] Sending message to API Gateway WebSocket (connection=%s)", connectionID)
 	ctx := context.TODO()
 
 	input := &apigatewaymanagementapi.PostToConnectionInput{
@@ -262,21 +269,11 @@ func sendMessageToClient(connectionID string, message []byte) error {
 
 	_, err := apiGatewayClient.PostToConnection(ctx, input)
 	if err != nil {
-		log.Printf("Failed to send message: %v", err)
-		return fmt.Errorf("failed to send message: %v", err)
+		log.Printf("[AWS] Failed to send message to client %s: %v", connectionID, err)
+		return fmt.Errorf("failed to send message to client %s: %v", connectionID, err)
 	}
+	log.Printf("[AWS] Successfully sent message to client %s", connectionID)
 	return nil
-}
-
-func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Only GET requests are allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func main() {
@@ -284,7 +281,6 @@ func main() {
 	mux.HandleFunc("/connect", connectHandler)
 	mux.HandleFunc("/disconnect", disconnectHandler)
 	mux.HandleFunc("/msg", defaultHandler)
-	mux.HandleFunc("/health", healthCheckHandler)
 
 	port := os.Getenv("PORT")
 	if port == "" {
