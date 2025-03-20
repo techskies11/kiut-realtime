@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -111,15 +110,13 @@ func eventListener(connectionID string, client *websocket.Conn) {
 	log.Printf("[Listener] Started listening for connection: %s", connectionID)
 
 	for {
-		msgType, reader, err := client.NextReader()
+		msgType, message, err := client.ReadMessage()
 		if err != nil {
 			log.Printf("[Listener] Error reading message for connection %s: %v", connectionID, err)
 			break
 		}
-		buf := new(bytes.Buffer)
-		buf.ReadFrom(reader)
 		log.Printf("[Listener] Received message from OpenAI for connection type:%d, %s", msgType, connectionID)
-		go handleEvent(connectionID, buf.Bytes())
+		handleEvent(connectionID, message)
 	}
 }
 
@@ -142,8 +139,8 @@ func connectToOpenAI(connectionID string) error {
 	}
 
 	clientsMu.Lock()
+	defer clientsMu.Unlock()
 	clients[connectionID] = client
-	clientsMu.Unlock()
 
 	// Setup server configs
 	err = setupServerConfigs(client)
@@ -219,7 +216,9 @@ func disconnectHandler(w http.ResponseWriter, r *http.Request) {
 
 func forwardMessageToOpenAI(event AudioMessage) error {
 	log.Printf("[OpenAI] forwarding message to OpenAI: %s", event.Body.Type)
-	// read only operation, no need to lock
+	// read only lock
+	clientsMu.Lock()
+	defer clientsMu.Unlock()
 	client, ok := clients[event.ConnectionId]
 	if !ok {
 		return fmt.Errorf("[OpenAI] client with connection ID %s not found", event.ConnectionId)
