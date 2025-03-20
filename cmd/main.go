@@ -115,6 +115,7 @@ func eventListener(connectionID string, client *websocket.Conn) {
 			log.Printf("[Listener] Error reading message for connection %s: %v", connectionID, err)
 			break
 		}
+		log.Printf("[Listener] Received message from OpenAI for connection %s", connectionID)
 		go handleEvent(connectionID, message)
 	}
 }
