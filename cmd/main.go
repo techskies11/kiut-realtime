@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -110,13 +111,15 @@ func eventListener(connectionID string, client *websocket.Conn) {
 	log.Printf("[Listener] Started listening for connection: %s", connectionID)
 
 	for {
-		_, message, err := client.ReadMessage()
+		msgType, reader, err := client.NextReader()
 		if err != nil {
 			log.Printf("[Listener] Error reading message for connection %s: %v", connectionID, err)
 			break
 		}
-		log.Printf("[Listener] Received message from OpenAI for connection %s", connectionID)
-		go handleEvent(connectionID, message)
+		buf := new(bytes.Buffer)
+		buf.ReadFrom(reader)
+		log.Printf("[Listener] Received message from OpenAI for connection type:%d, %s", msgType, connectionID)
+		go handleEvent(connectionID, buf.Bytes())
 	}
 }
 
