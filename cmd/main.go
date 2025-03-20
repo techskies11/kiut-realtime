@@ -356,6 +356,7 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	bodyBytes, err := io.ReadAll(r.Body)
+	defer r.Body.Close()
 	if err != nil {
 		log.Printf("[TWILIO] Error reading request body: %v", err)
 		w.Header().Set("Content-Type", "application/json")
@@ -363,7 +364,6 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"error": "Error reading request body"})
 		return
 	}
-	defer r.Body.Close()
 
 	var data TwilioGatewayEvent
 	if err := json.Unmarshal(bodyBytes, &data); err != nil {
@@ -373,7 +373,6 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid JSON"})
 		return
 	}
-	defer r.Body.Close()
 
 	connectionID := data.ConnectionID
 	mediaEventBody := data.Body
@@ -381,8 +380,8 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 
 	if mediaEventBody.Event == "start" {
 		streamSIDMu.Lock()
-		defer streamSIDMu.Unlock()
 		connectionToStreamSID[connectionID] = mediaEventBody.StreamSID
+		streamSIDMu.Unlock()
 		w.WriteHeader(http.StatusOK)
 		return
 	}
