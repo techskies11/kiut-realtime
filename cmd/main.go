@@ -109,7 +109,11 @@ func eventListener(connectionID string, client *websocket.Conn) {
 		sendMessageToClient(connectionID, message)
 		var event GenericEvent
 		err = json.Unmarshal(message, &event)
-		log.Printf("event received: %s", event.Type)
+		if err != nil {
+			log.Printf("error: %v", err)
+		} else {
+			log.Printf("event received: %s", event.Type)
+		}
 	}
 }
 
