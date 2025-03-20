@@ -128,11 +128,7 @@ func setupServerConfigs(client *websocket.Conn) error {
 			InputAudioTranscription: nil,
 		},
 	}
-	sessionUpdateBytes, err := json.Marshal(sessionUpdate)
-	if err != nil {
-		return fmt.Errorf("error: %v", err)
-	}
-	client.WriteMessage(websocket.TextMessage, sessionUpdateBytes)
+	client.WriteJSON(sessionUpdate)
 
 	return nil
 }
@@ -156,6 +152,7 @@ func handleEvent(connectionID string, message []byte) {
 	} else {
 		log.Printf("[Listener] Event listened: %s", event.Type)
 	}
+	log.Printf("[Listener] Handling event of type: %s for connection %s", event.Type, connectionID)
 
 	if event.Type != "response.audio.delta" {
 		return
@@ -169,8 +166,8 @@ func handleEvent(connectionID string, message []byte) {
 	}
 
 	streamSIDMu.Lock()
-	defer streamSIDMu.Unlock()
 	streamSID, ok := connectionToStreamSID[connectionID]
+	streamSIDMu.Unlock()
 	if ok {
 		twilioMediaEvent := createTwilioMediaEvent(streamSID, audioDelta)
 		message, err := json.Marshal(twilioMediaEvent)
@@ -312,13 +309,8 @@ func forwardMessageToOpenAI(connectionID string, event AudioEvent) error {
 	}
 
 	// forward the message to the OpenAI WebSocket server. sends both type and audio from AudioEvent
-	messageBytes, err := json.Marshal(event)
-	if err != nil {
-		log.Printf("[OpenAI] failed to marshal message: %v", err)
-		return fmt.Errorf("[OpenAI] failed to marshal message: %v", err)
-	}
 	log.Print("[OpenAI] sending message to OpenAI")
-	err = client.WriteMessage(websocket.TextMessage, messageBytes)
+	err := client.WriteJSON(event)
 	if err != nil {
 		log.Printf("[OpenAI] failed to send message to OpenAI: %v", err)
 		return fmt.Errorf("[OpenAI] failed to send message to OpenAI: %v", err)
