@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -354,8 +355,18 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("[TWILIO] Error reading request body: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Error reading request body"})
+		return
+	}
+	defer r.Body.Close()
+
 	var data TwilioGatewayEvent
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+	if err := json.Unmarshal(bodyBytes, &data); err != nil {
 		log.Printf("[TWILIO] Invalid JSON: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -382,7 +393,7 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Convert the media event to a TwilioMediaEvent
 	var mediaEvent TwilioMediaGatewayEvent
-	if err := json.NewDecoder(r.Body).Decode(&mediaEvent); err != nil {
+	if err := json.Unmarshal(bodyBytes, &mediaEvent); err != nil {
 		log.Printf("[TWILIO] Invalid media type: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
