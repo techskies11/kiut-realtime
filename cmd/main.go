@@ -19,11 +19,6 @@ type SimpleContext struct {
 	ConnectionID string `json:"connectionId"`
 }
 
-type MessageContext struct {
-	Body         any    `json:"body"`
-	ConnectionId string `json:"connectionId"`
-}
-
 type OpenAISession struct {
 	Instructions string `json:"instructions"`
 }
@@ -40,6 +35,16 @@ type WebSocketClient struct {
 
 type GenericEvent struct {
 	Type string `json:"type"`
+}
+
+type AudioEvent struct {
+	Type  string `json:"type"`
+	Audio string `json:"audio"`
+}
+
+type AudioMessage struct {
+	Body         AudioEvent `json:"body"`
+	ConnectionId string     `json:"connectionId"`
 }
 
 var (
@@ -130,11 +135,11 @@ func connectToOpenAI(connectionID string) error {
 	}
 
 	// Setup server configs
-	// err = setupServerConfigs(client)
-	// if err != nil {
-	// 	log.Printf("error: %v", err)
-	// 	return fmt.Errorf("error: %v", err)
-	// }
+	err = setupServerConfigs(client)
+	if err != nil {
+		log.Printf("error: %v", err)
+		return fmt.Errorf("error: %v", err)
+	}
 	// Start a goroutine to read messages from the WebSocket server and just print them for now
 	go eventListener(connectionID, client)
 
@@ -195,14 +200,19 @@ func disconnectHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func forwardMessageToOpenAI(connectionID string, message []byte) error {
+func forwardMessageToOpenAI(connectionID string, message AudioEvent) error {
 	// read only operation, no need to lock
 	client, ok := clients[connectionID]
 	if !ok {
 		return fmt.Errorf("client with connection ID %s not found", connectionID)
 	}
 
-	err := client.Conn.WriteMessage(websocket.TextMessage, message)
+	// forward the message to the OpenAI WebSocket server. sends both type and audio from AudioEvent
+	messageBytes, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf("failed to marshal message: %v", err)
+	}
+	err = client.Conn.WriteMessage(websocket.TextMessage, messageBytes)
 	if err != nil {
 		return fmt.Errorf("failed to send message to OpenAI: %v", err)
 	}
@@ -216,7 +226,7 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var data MessageContext
+	var data AudioMessage
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -228,18 +238,11 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 	// Extract connectionId from data
 	connectionID := data.ConnectionId
 
-	// message bytes: transform data.body's json object into bytes
-	messageBytes, err := json.Marshal(data.Body)
-	if err != nil {
-		log.Printf("Failed to marshal message: %v", err)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Failed to marshal message: %v", err)})
-		return
-	}
+	// log body type
+	log.Printf("Received message from connection ID %s: %v", connectionID, data.Body)
 
 	// Forward the message to the OpenAI WebSocket server
-	err = forwardMessageToOpenAI(connectionID, messageBytes)
+	err := forwardMessageToOpenAI(connectionID, data.Body)
 	if err != nil {
 		log.Printf("Failed to send message: %v", err)
 		w.Header().Set("Content-Type", "application/json")
