@@ -19,14 +19,9 @@ type SimpleContext struct {
 	ConnectionID string `json:"connectionId"`
 }
 
-type BodyContext struct {
-	Action  string `json:"action"`
-	Message string `json:"message"`
-}
-
 type MessageContext struct {
-	Body         BodyContext `json:"body"`
-	ConnectionId string      `json:"connectionId"`
+	Body         any    `json:"body"`
+	ConnectionId string `json:"connectionId"`
 }
 
 type OpenAISession struct {
@@ -232,11 +227,21 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Extract connectionId from data
 	connectionID := data.ConnectionId
-	message := fmt.Appendf(nil, "msg recieved: %s", data.Body.Message)
+
+	// message bytes: transform data.body's json object into bytes
+	messageBytes, err := json.Marshal(data.Body)
+	if err != nil {
+		log.Printf("Failed to marshal message: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Failed to marshal message: %v", err)})
+		return
+	}
 
 	// Forward the message to the OpenAI WebSocket server
-	err := forwardMessageToOpenAI(connectionID, message)
+	err = forwardMessageToOpenAI(connectionID, messageBytes)
 	if err != nil {
+		log.Printf("Failed to send message: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusGone)
 		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Failed to send message: %v", err)})
