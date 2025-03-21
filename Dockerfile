@@ -21,7 +21,12 @@ WORKDIR /root/
 # Copy the built binary from the builder stage
 COPY --from=builder /app/realtime-server .
 
+# Set build arguments
+ARG ARG_OPENAI_API_KEY
+
 # Set environment variables
+ENV OPENAI_WSS_URL="wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17"
+ENV OPENAI_API_KEY=${ARG_OPENAI_API_KEY}
 ENV API_GATEWAY_ENDPOINT="https://qbo0hzke23.execute-api.us-east-1.amazonaws.com/dev"
 ENV PORT=8080
 
