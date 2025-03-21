@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -19,8 +20,15 @@ type SimpleContext struct {
 	ConnectionID string `json:"connectionId"`
 }
 
+type SessionTranscription struct {
+	Model string `json:"model"`
+}
+
 type OpenAISession struct {
-	Instructions string `json:"instructions"`
+	Instructions            string                `json:"instructions"`
+	InputAudioFormat        string                `json:"input_audio_format"`
+	OutputAudioFormat       string                `json:"output_audio_format"`
+	InputAudioTranscription *SessionTranscription `json:"input_audio_transcription"`
 }
 
 type SessionUpdate struct {
@@ -42,9 +50,46 @@ type AudioMessage struct {
 	ConnectionId string     `json:"connectionId"`
 }
 
+type AudioDeltaEvent struct {
+	Delta string `json:"delta"`
+}
+
+type TwilioMediaInfo struct {
+	Track     string `json:"track"`
+	Chunk     string `json:"chunk,omitempty"`
+	Timestamp string `json:"timestamp,omitempty"`
+	Payload   string `json:"payload"`
+}
+
+type TwilioMediaEvent struct {
+	Event     string          `json:"event"`
+	StreamSID string          `json:"streamSid"`
+	Media     TwilioMediaInfo `json:"media"`
+}
+
+type BaseTwilioEvent struct {
+	Event     string `json:"event"`
+	StreamSID string `json:"streamSid"`
+}
+
+type TwilioMediaGatewayEvent struct {
+	Body         TwilioMediaEvent `json:"body"`
+	ConnectionID string           `json:"connectionId"`
+}
+
+type TwilioGatewayEvent struct {
+	Body         BaseTwilioEvent `json:"body"` // for now we're stuck with twilio events
+	ConnectionID string          `json:"connectionId"`
+}
+
 var (
 	clients   = make(map[string]*websocket.Conn)
 	clientsMu sync.Mutex
+)
+
+var (
+	connectionToStreamSID = make(map[string]string)
+	streamSIDMu           sync.Mutex
 )
 
 var apiGatewayClient *apigatewaymanagementapi.Client
@@ -77,31 +122,95 @@ func setupServerConfigs(client *websocket.Conn) error {
 	sessionUpdate := SessionUpdate{
 		Type: "session.update",
 		Session: OpenAISession{
-			Instructions: "Eres un asistente de ventas para una aerolínea. Eres tajante y conciso. Te restringes únicamente a responder sus preguntas asociadas a sus viajes, o lo guías a ese tipo de conversación.",
+			Instructions:            "Eres un asistente de ventas para una aerolínea. Eres tajante y conciso. Te restringes únicamente a responder sus preguntas asociadas a sus viajes, o lo guías a ese tipo de conversación.",
+			InputAudioFormat:        "g711_ulaw",
+			OutputAudioFormat:       "g711_ulaw",
+			InputAudioTranscription: nil,
 		},
 	}
-	sessionUpdateBytes, err := json.Marshal(sessionUpdate)
-	if err != nil {
-		return fmt.Errorf("error: %v", err)
-	}
-	client.WriteMessage(websocket.TextMessage, sessionUpdateBytes)
+	client.WriteJSON(sessionUpdate)
 
 	return nil
 }
 
-func handleEvent(connectionID string, message []byte) {
-	// log.Printf("received: %s", message)
-	err := sendMessageToClient(connectionID, message)
-	if err != nil {
-		log.Printf("[Listener] Error sending message to client %s: %v", connectionID, err)
+func createTwilioMediaEvent(streamSID string, audioDelta AudioDeltaEvent) TwilioMediaEvent {
+	return TwilioMediaEvent{
+		Event:     "media",
+		StreamSID: streamSID,
+		Media: TwilioMediaInfo{
+			Track:   "outbound",
+			Payload: audioDelta.Delta,
+		},
+	}
+}
+
+func cancelOpenAIResponse(connectionID string) {
+	cancelEvent := GenericEvent{
+		Type: "response.cancel",
+	}
+	forwardMessageToOpenAI(connectionID, cancelEvent)
+}
+
+func clearTwilio(connectionID string) {
+	streamSIDMu.Lock()
+	streamSID, ok := connectionToStreamSID[connectionID]
+	if !ok {
+		log.Printf("[INTERNAL] Couldn't retrieve streamSID from connection %s", connectionID)
 		return
 	}
+	streamSIDMu.Unlock()
+
+	clearEvent := BaseTwilioEvent{
+		Event:     "clear",
+		StreamSID: streamSID,
+	}
+	sendMessageToClient(connectionID, clearEvent)
+}
+
+func handleInterrupt(connectionID string) {
+	// OpenAI cancel response
+	go cancelOpenAIResponse(connectionID)
+	// Twilio clear output buffer
+	go clearTwilio(connectionID)
+}
+
+func handleAudioDelta(connectionID string, message []byte) {
+	var audioDelta AudioDeltaEvent
+	err := json.Unmarshal(message, &audioDelta)
+	if err != nil {
+		log.Printf("[Listener] Error unmarshalling audio delta for connection %s: %v", connectionID, err)
+		return
+	}
+
+	streamSIDMu.Lock()
+	streamSID, ok := connectionToStreamSID[connectionID]
+	streamSIDMu.Unlock()
+	if ok {
+		twilioMediaEvent := createTwilioMediaEvent(streamSID, audioDelta)
+		err = sendMessageToClient(connectionID, twilioMediaEvent)
+		if err != nil {
+			log.Printf("[Listener] Error sending message to client %s: %v", connectionID, err)
+			return
+		}
+	}
+}
+
+func handleEvent(connectionID string, message []byte) {
 	var event GenericEvent
-	err = json.Unmarshal(message, &event)
+	err := json.Unmarshal(message, &event)
 	if err != nil {
 		log.Printf("[Listener] Error unmarshalling message for connection %s: %v", connectionID, err)
-	} else {
-		log.Printf("[Listener] Event listened: %s", event.Type)
+		return
+	}
+	log.Printf("[Listener] Event listened: %s", event.Type)
+
+	if event.Type == "input_audio_buffer.speech_started" {
+		handleInterrupt(connectionID)
+		return
+	}
+	if event.Type == "response.audio.delta" {
+		handleAudioDelta(connectionID, message)
+		return
 	}
 }
 
@@ -139,8 +248,8 @@ func connectToOpenAI(connectionID string) error {
 	}
 
 	clientsMu.Lock()
-	defer clientsMu.Unlock()
 	clients[connectionID] = client
+	clientsMu.Unlock()
 
 	// Setup server configs
 	err = setupServerConfigs(client)
@@ -210,34 +319,56 @@ func disconnectHandler(w http.ResponseWriter, r *http.Request) {
 		client.Close()
 		delete(clients, data.ConnectionID)
 	}
+	streamSIDMu.Lock()
+	defer streamSIDMu.Unlock()
+	_, ok = connectionToStreamSID[data.ConnectionID]
+	if ok {
+		delete(connectionToStreamSID, data.ConnectionID)
+	}
 
 	w.WriteHeader(http.StatusOK)
 }
 
-func forwardMessageToOpenAI(event AudioMessage) error {
-	log.Printf("[OpenAI] forwarding message to OpenAI: %s", event.Body.Type)
+func forwardMessageToOpenAI(connectionID string, event any) error {
+	// log.Printf("[OpenAI] forwarding message to OpenAI: %s", event.Type)
 	// read only lock
 	clientsMu.Lock()
 	defer clientsMu.Unlock()
-	client, ok := clients[event.ConnectionId]
+	client, ok := clients[connectionID]
 	if !ok {
-		return fmt.Errorf("[OpenAI] client with connection ID %s not found", event.ConnectionId)
+		return fmt.Errorf("[OpenAI] client with connection ID %s not found", connectionID)
 	}
 
 	// forward the message to the OpenAI WebSocket server. sends both type and audio from AudioEvent
-	messageBytes, err := json.Marshal(event.Body)
-	if err != nil {
-		log.Printf("[OpenAI] failed to marshal message: %v", err)
-		return fmt.Errorf("[OpenAI] failed to marshal message: %v", err)
-	}
-	log.Print("[OpenAI] sending message to OpenAI")
-	err = client.WriteMessage(websocket.TextMessage, messageBytes)
+	// log.Print("[OpenAI] sending message to OpenAI")
+	err := client.WriteJSON(event)
 	if err != nil {
 		log.Printf("[OpenAI] failed to send message to OpenAI: %v", err)
 		return fmt.Errorf("[OpenAI] failed to send message to OpenAI: %v", err)
 	}
 
-	log.Printf("[OpenAI] Successfully forwarded message to OpenAI")
+	// log.Printf("[OpenAI] Successfully forwarded message to OpenAI")
+	return nil
+}
+
+func twilioToOpenAIEvent(event TwilioMediaEvent) AudioEvent {
+	// convert the TwilioMediaEvent to an AudioMessage
+	return AudioEvent{
+		Type:  "input_audio_buffer.append",
+		Audio: event.Media.Payload,
+	}
+}
+
+func processMediaEvent(connectionID string, event TwilioMediaEvent) error {
+	// Convert the Twilio media event to an AudioMessage
+	openaiEvent := twilioToOpenAIEvent(event)
+
+	// Forward the message to the OpenAI WebSocket server
+	err := forwardMessageToOpenAI(connectionID, openaiEvent)
+	if err != nil {
+		log.Printf("[TWILIO] Error forwarding message to OpenAI: %v", err)
+		return err
+	}
 	return nil
 }
 
@@ -247,38 +378,77 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var data AudioMessage
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+	bodyBytes, err := io.ReadAll(r.Body)
+	defer r.Body.Close()
+	if err != nil {
+		log.Printf("[TWILIO] Error reading request body: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Error reading request body"})
+		return
+	}
+
+	var data TwilioGatewayEvent
+	if err := json.Unmarshal(bodyBytes, &data); err != nil {
+		log.Printf("[TWILIO] Invalid JSON: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid JSON"})
 		return
 	}
-	defer r.Body.Close()
 
-	// Forward the message to the OpenAI WebSocket server
-	err := forwardMessageToOpenAI(data)
-	if err != nil {
-		log.Printf("[OpenAI] Failed to send message: %v", err)
+	connectionID := data.ConnectionID
+	mediaEventBody := data.Body
+	// log.Printf("[TWILIO] Received media event: %s", mediaEventBody.Event)
+
+	if mediaEventBody.Event == "start" {
+		streamSIDMu.Lock()
+		connectionToStreamSID[connectionID] = mediaEventBody.StreamSID
+		streamSIDMu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if mediaEventBody.Event != "media" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Convert the media event to a TwilioMediaEvent
+	var mediaEvent TwilioMediaGatewayEvent
+	if err := json.Unmarshal(bodyBytes, &mediaEvent); err != nil {
+		log.Printf("[TWILIO] Invalid media type: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid JSON"})
+		return
+	}
+
+	if err := processMediaEvent(connectionID, mediaEvent.Body); err != nil {
+		log.Printf("[TWILIO] Error processing media event: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusGone)
-		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Failed to send message: %v", err)})
+		json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf("Failed to process media event: %v", err)})
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
 }
 
-func sendMessageToClient(connectionID string, message []byte) error {
+func sendMessageToClient(connectionID string, event any) error {
 	log.Printf("[AWS] Sending message to API Gateway WebSocket (connection=%s)", connectionID)
 	ctx := context.TODO()
+
+	message, err := json.Marshal(event)
+	if err != nil {
+		log.Printf("[INTERNAL] Marshaling for event failed for whatever reason for connection %s", connectionID)
+	}
 
 	input := &apigatewaymanagementapi.PostToConnectionInput{
 		ConnectionId: aws.String(connectionID),
 		Data:         message,
 	}
 
-	_, err := apiGatewayClient.PostToConnection(ctx, input)
+	_, err = apiGatewayClient.PostToConnection(ctx, input)
 	if err != nil {
 		log.Printf("[AWS] Failed to send message to client %s: %v", connectionID, err)
 		return fmt.Errorf("failed to send message to client %s: %v", connectionID, err)
