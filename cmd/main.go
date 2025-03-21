@@ -144,21 +144,39 @@ func createTwilioMediaEvent(streamSID string, audioDelta AudioDeltaEvent) Twilio
 	}
 }
 
-func handleEvent(connectionID string, message []byte) {
-	var event GenericEvent
-	err := json.Unmarshal(message, &event)
-	if err != nil {
-		log.Printf("[Listener] Error unmarshalling message for connection %s: %v", connectionID, err)
+func cancelOpenAIResponse(connectionID string) {
+	cancelEvent := GenericEvent{
+		Type: "response.cancel",
+	}
+	forwardMessageToOpenAI(connectionID, cancelEvent)
+}
+
+func clearTwilio(connectionID string) {
+	streamSIDMu.Lock()
+	streamSID, ok := connectionToStreamSID[connectionID]
+	if !ok {
+		log.Printf("[INTERNAL] Couldn't retrieve streamSID from connection %s", connectionID)
 		return
 	}
-	log.Printf("[Listener] Event listened: %s", event.Type)
+	streamSIDMu.Unlock()
 
-	if event.Type != "response.audio.delta" {
-		return
+	clearEvent := BaseTwilioEvent{
+		Event:     "clear",
+		StreamSID: streamSID,
 	}
+	sendMessageToClient(connectionID, clearEvent)
+}
 
+func handleInterrupt(connectionID string) {
+	// OpenAI cancel response
+	go cancelOpenAIResponse(connectionID)
+	// Twilio clear output buffer
+	go clearTwilio(connectionID)
+}
+
+func handleAudioDelta(connectionID string, message []byte) {
 	var audioDelta AudioDeltaEvent
-	err = json.Unmarshal(message, &audioDelta)
+	err := json.Unmarshal(message, &audioDelta)
 	if err != nil {
 		log.Printf("[Listener] Error unmarshalling audio delta for connection %s: %v", connectionID, err)
 		return
@@ -169,16 +187,30 @@ func handleEvent(connectionID string, message []byte) {
 	streamSIDMu.Unlock()
 	if ok {
 		twilioMediaEvent := createTwilioMediaEvent(streamSID, audioDelta)
-		message, err := json.Marshal(twilioMediaEvent)
-		if err != nil {
-			log.Printf("[Listener] Error marshalling Twilio Media Event for some reason: %v", err)
-			return
-		}
-		err = sendMessageToClient(connectionID, message)
+		err = sendMessageToClient(connectionID, twilioMediaEvent)
 		if err != nil {
 			log.Printf("[Listener] Error sending message to client %s: %v", connectionID, err)
 			return
 		}
+	}
+}
+
+func handleEvent(connectionID string, message []byte) {
+	var event GenericEvent
+	err := json.Unmarshal(message, &event)
+	if err != nil {
+		log.Printf("[Listener] Error unmarshalling message for connection %s: %v", connectionID, err)
+		return
+	}
+	log.Printf("[Listener] Event listened: %s", event.Type)
+
+	if event.Type == "input_audio_buffer.speech_started" {
+		handleInterrupt(connectionID)
+		return
+	}
+	if event.Type == "response.audio.delta" {
+		handleAudioDelta(connectionID, message)
+		return
 	}
 }
 
@@ -297,7 +329,7 @@ func disconnectHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func forwardMessageToOpenAI(connectionID string, event AudioEvent) error {
+func forwardMessageToOpenAI(connectionID string, event any) error {
 	// log.Printf("[OpenAI] forwarding message to OpenAI: %s", event.Type)
 	// read only lock
 	clientsMu.Lock()
@@ -402,16 +434,21 @@ func defaultHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func sendMessageToClient(connectionID string, message []byte) error {
+func sendMessageToClient(connectionID string, event any) error {
 	log.Printf("[AWS] Sending message to API Gateway WebSocket (connection=%s)", connectionID)
 	ctx := context.TODO()
+
+	message, err := json.Marshal(event)
+	if err != nil {
+		log.Printf("[INTERNAL] Marshaling for event failed for whatever reason for connection %s", connectionID)
+	}
 
 	input := &apigatewaymanagementapi.PostToConnectionInput{
 		ConnectionId: aws.String(connectionID),
 		Data:         message,
 	}
 
-	_, err := apiGatewayClient.PostToConnection(ctx, input)
+	_, err = apiGatewayClient.PostToConnection(ctx, input)
 	if err != nil {
 		log.Printf("[AWS] Failed to send message to client %s: %v", connectionID, err)
 		return fmt.Errorf("failed to send message to client %s: %v", connectionID, err)
